@@ -22,14 +22,19 @@ func main () {
 
 	pgdb.PrintDburl(db)
 
+	err = db.InitDb()
+	if err != nil {log.Fatalf("error -- initdb: %v\n", err)}
+
+	log.Printf("db connected!")
+
 	sqlStr :=""
 	for i:=0; i< 5; i++ {
 		var err error
-		sqlStr, err = pgdb.GetSql()
+		sqlStr, err = pgdb.GetSql(db.DbName)
 		if err != nil {log.Fatalf("error -- sqlStr: %v\n", err)}
 //		fmt.Printf("sql: %s\n", sqlStr)
 		if len(sqlStr) == 0 {continue}
-		idx := strings.Index(sqlStr, "end")
+		idx := strings.Index(sqlStr, "exit")
 		if idx >= 0 {
 			fmt.Println("*** exiting ***")
 			os.Exit(0)
@@ -37,16 +42,21 @@ func main () {
 		cmds := strings.Split(sqlStr, " ")
 //		fmt.Printf("%s: %s\n", cmds[0], sqlStr)
 		switch cmds[0] {
+		case "select":
+			fields, values, err := db.ProcSelect(sqlStr)
+			if err != nil {fmt.Printf("error -- select: %v\n", err)}
+			db.PrintSelect(fields, values)
 		case "show":
-			err := pgdb.ProcShow(sqlStr)
+			err := db.ProcShow(sqlStr)
 			if err != nil {fmt.Printf("error -- show: %v\n", err)}
 		case "exit":
 			break
 		default:
-			err:= pgdb.ProcSql(sqlStr)
+			err:= db.ProcSql(sqlStr)
 			if err != nil {fmt.Printf("error -- sql: %v\n", err)}
 		}
 	}
+	db.CloseDb()
 	fmt.Println("*** success exiting ***")
 }
 
