@@ -7,36 +7,43 @@ import (
 	"bufio"
 	"strings"
 	"context"
+    "github.com/jackc/pgx/v5/pgconn"
     "github.com/jackc/pgx/v5"
     util "github.com/prr123/utility/utilLib"
 )
 
 type dbCon struct {
 	dburl string
+	DbName string
 	dbcon *pgx.Conn
 	ctx context.Context
 	dbg bool
 }
 
-func (db dbCon)InitDb() (err error){
+type dbrowval []any
+
+
+func (db *dbCon)InitDb() (err error){
     ctx := context.Background()
 //    dburl :="postgresql://dbuser:dbtest@/testdb"
 
     dbcon, err := pgx.Connect(ctx, db.dburl)
     if err != nil {return fmt.Errorf("Unable to create db connection: %v\n", err)}
-    defer dbcon.Close(ctx)
-	db.ctx = ctx
-	db.dbcon = dbcon
+//    defer dbcon.Close(ctx)
+	(*db).ctx = ctx
+	(*db).dbcon = dbcon
 	return nil
 }
 
-func ProcCli(cliStr []string) (db dbCon, err error) {
+func ProcCli(cliStr []string) (dbpt *dbCon, err error) {
 
 	var dbinp struct {
 		user string
 		pwd string
 		db string
 	}
+
+	var db dbCon
 //    numarg := len(os.Args)
     numarg := len(cliStr)
 
@@ -58,7 +65,7 @@ func ProcCli(cliStr []string) (db dbCon, err error) {
     }
 
     flagMap, err := util.ParseFlags(cliStr, flags)
-    if err != nil {return db, fmt.Errorf("util.ParseFlags: %v\n", err)}
+    if err != nil {return nil, fmt.Errorf("util.ParseFlags: %v\n", err)}
 
     db.dbg = false
     _, ok := flagMap["dbg"]
@@ -66,50 +73,50 @@ func ProcCli(cliStr []string) (db dbCon, err error) {
 
     uval, ok := flagMap["user"]
     if !ok {
-        return db, fmt.Errorf("cli -- user not provided!")
+        return nil, fmt.Errorf("cli -- user not provided!")
     } else {
-        if uval.(string) == "none" {return db, fmt.Errorf("error: no user name provided!")}
+        if uval.(string) == "none" {return nil, fmt.Errorf("error: no user name provided!")}
         dbinp.user = uval.(string)
     }
 
     pval, ok := flagMap["pwd"]
     if !ok {
-        return db, fmt.Errorf("cli -- pwd not provided!")
+        return nil, fmt.Errorf("cli -- pwd not provided!")
     } else {
-        if pval.(string) == "none" {return db, fmt.Errorf("error: no password provided!")}
+        if pval.(string) == "none" {return nil, fmt.Errorf("error: no password provided!")}
         dbinp.pwd = pval.(string)
     }
 
     dbval, ok := flagMap["db"]
     if !ok {
-        return db, fmt.Errorf("cli -- db not provided!")
+        return nil, fmt.Errorf("cli -- db not provided!")
     } else {
-        if dbval.(string) == "none" {return db, fmt.Errorf("error: no db name provided!")}
+        if dbval.(string) == "none" {return nil, fmt.Errorf("error: no db name provided!")}
         dbinp.db = dbval.(string)
     }
 // postgresql://dbuser:dbtest@/testdb
 //    dburl :="postgresql://dbuser:dbtest@/testdb"
 	db.dburl = "postgresql://" + dbinp.user + ":" + dbinp.db + "@/" + dbinp.pwd
-
-    return db, nil
+	db.DbName = dbinp.db
+    return &db, nil
 }
 
-func GetSql() (sqlStr string, err error) {
+func GetSql(dbnam string) (sqlStr string, err error) {
 
     reader := bufio.NewReader(os.Stdin)
 
 //    multi := false
     for i:=0; i<5; i++ {
         if i== 0 {
-            fmt.Printf("sql> ")
+            fmt.Printf("%s> ", dbnam)
         } else {
-            fmt.Printf("sql %d> ", i)
+            fmt.Printf("%s sql %d> ", dbnam, i)
         }
         line, err := reader.ReadString('\n')
         if err != nil {return sqlStr, fmt.Errorf("reading line: %v\n", err)}
 
         if len(line) == 1 {break}
-		if edx:=strings.Index(line, "end"); edx>-1 {return "end", nil}
+		if edx:=strings.Index(line, "exit"); edx>-1 {return "exit", nil}
 
         trimLine := strings.TrimSuffix(line,"\n")
 //      fmt.Printf("line>%s<\n", trimLine)
@@ -129,16 +136,93 @@ func GetSql() (sqlStr string, err error) {
 	return sqlStr, nil
 }
 
-func ProcShow(sql string) (err error) {
+func (db *dbCon) ProcShow(sql string) (err error) {
     fmt.Printf("Proc show: %s\n", sql)
+
     return nil
 }
 
-func ProcSql(sql string) (err error) {
+func (db *dbCon) ProcSql(sql string) (err error) {
     fmt.Printf("Proc sql: %s\n", sql)
+
+
     return nil
 }
 
-func PrintDburl(db dbCon) {
+
+func (db *dbCon) ProcSelect(query string) (fields []pgconn.FieldDescription, valList []dbrowval, err error) {
+    fmt.Printf("Proc select: %s\n", query)
+	ctx := (*db).ctx
+	pgcon := (*db).dbcon
+	rows, err := pgcon.Query(ctx, query)
+    if err != nil {
+        return fields, valList, fmt.Errorf("select query failed: %v\n", err)
+    }
+    defer rows.Close()
+
+    fields = rows.FieldDescriptions()
+	valList = make([]dbrowval,0,50)
+	count:=0
+    for rows.Next() {
+        val, err := rows.Values()
+        if err != nil {
+            return fields, valList, fmt.Errorf("row[%d]: get row values : %v\n", count, err)
+        }
+		valList = append(valList, val)
+ 		count++
+	}
+
+    return fields, valList, nil
+}
+
+func (db *dbCon)CloseDb() {
+	ctx := (*db).ctx
+	pgcon := (*db).dbcon
+	pgcon.Close(ctx)
+}
+
+func PrintDburl(db *dbCon) {
 	fmt.Printf("dburl: %s\n",db.dburl)
+}
+
+func (db *dbCon)PrintSelect(fields []pgconn.FieldDescription, values []dbrowval) {
+
+	pgm := (*db).dbcon.TypeMap()
+	for i:=0; i<len(fields); i++ {
+		fmt.Printf("%-20s|", fields[i].Name)
+	}
+	fmt.Printf("\n")
+
+	for i:=0; i<len(fields); i++ {
+		field := fields[i]
+       ftyp, res := pgm.TypeForOID(field.DataTypeOID)
+        if !res {
+            fmt.Printf("%-20s|","unkown")
+        } else {
+            fmt.Printf("%-20s|", ftyp.Name)
+        }
+	}
+	fmt.Printf("\n")
+
+
+
+	if len(values) == 0 {return}
+	val := values[0]
+	for i:=0; i<len(fields); i++ {
+		fmt.Printf("%-20T|", val[i])
+	}
+	fmt.Printf("\n")
+	for i:=0; i<len(fields); i++ {
+		fmt.Printf("====================|")
+	}
+	fmt.Printf("\n")
+
+
+	for i:=0; i<len(values); i++ {
+		valrow:= values[i]
+		for j:=0; j<len(fields); j++ {
+			fmt.Printf("%-20v|", valrow[j])
+		}
+		fmt.Printf("\n")
+	}
 }
